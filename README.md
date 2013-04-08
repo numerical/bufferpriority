@@ -28,7 +28,6 @@ TODO
 
 Script technically works but it is still in alpha.
 
-- Need to save the priority list
-- Add sanity some sanity checks
+- Add some some sanity checks
 - Make negative values move buffers to the end
 - Tons of other shit I'm sure I missed
