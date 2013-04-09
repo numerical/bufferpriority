@@ -8,13 +8,15 @@ except:
 
 NAME = "buffer_priority"
 AUTHOR = "numeral <numerical@gmail.com>"
-VERSION = "0.05"
+VERSION = "0.10"
 LICENSE = "GPL3"
 DESCRIPTION = "This plugin attempts to be the end all of buffer placement."
 
 conf_opt = "plist"
+conf_opt2 = "main_top"
 
 buffers = {} # Hold all the buffers in a dict
+maintop = True
 
 # Python2Weechat
 def py2wee(dictionary):
@@ -36,76 +38,62 @@ def wee2py(string):
 # Save
 def save_state():
     global buffers
+    global maintop
     if(len(buffers)):
         wee.config_set_plugin(conf_opt, py2wee(buffers))
+        wee.config_set_plugin(conf_opt2, str(maintop))
+
     return
 
 # Load
 def load_state():
     global buffers
+    global maintop
     if wee.config_is_set_plugin(conf_opt):
         buffers = wee2py(wee.config_get_plugin(conf_opt))
+        maintop = bool(wee.config_get_plugin(conf_opt2))
     else:
         buffers = {}
+        maintop = True
+
     return
 
+
+def reorder_buffers():
+    global buffers
+    bufcopy = dict(buffers)
+    priolist = []
+    while len(bufcopy):
+        priolist.append(max(bufcopy, key=bufcopy.get))
+        bufcopy.pop(max(bufcopy, key=bufcopy.get))
+    pointerlist = {}
+    infolist = wee.infolist_get("buffer", "", "")
+    while wee.infolist_next(infolist): # go through the buffers and jot down relevant pointers
+        for name in priolist:
+            try:
+                bufname = wee.infolist_string(infolist, "name").split('.', 1)[1]
+            except IndexError:
+                bufname = wee.infolist_string(infolist, "name")
+            if name == bufname:
+                if name in pointerlist:
+                    pointerlist[name].append(wee.infolist_pointer(infolist, "pointer"))
+                else:
+                    pointerlist[name] = [wee.infolist_pointer(infolist, "pointer")]
+
+    wee.prnt("", "pointerlist" + str(priolist))
+    index = 1
+    if(maintop):
+        index += 1
+    for name in priolist:
+        if name in pointerlist:
+            for pointer in pointerlist[name]:
+                wee.buffer_set(pointer, "number", str(index))
+                index += 1
+    return
 
 def reorder_cb(data, signal, signal_data):
     reorder_buffers()
     return wee.WEECHAT_RC_OK
-
-def reorder_buffers():
-    global buffers
-    if(len(buffers) == 0):
-        return
-
-    currents = {}
-    # First pass over buffers to gather information
-    infolist = wee.infolist_get("buffer", "", "")
-    while wee.infolist_next(infolist):
-        currents[wee.infolist_string(infolist, "name")] = wee.infolist_integer(infolist, "number")
-        if(wee.infolist_string(infolist, "name") == 'weechat'): # I like the status buffer
-            statusnumber = wee.infolist_integer(infolist, "number")
-    wee.infolist_free(infolist)
-
-    neworder = ['weechat']
-    for buf in currents.keys():
-        if currents[buf] == statusnumber: # merged with status buffer
-            continue
-        buf = buf.split('.', 1) # TODO Same as below, dot servers?
-        try:
-            buf = buf[1]
-        except IndexError:
-            buf = buf[0]
-        if buf in buffers: # Has a priority
-            foundplace = False
-            for i in range(1, len(neworder)):
-                if ((neworder[i] in buffers and buffers[neworder[i]] < buffers[buf])
-                        or neworder[i] not in buffers):
-                    foundplace = True
-                    neworder.insert(i, buf)
-                    break
-            if not foundplace: # end of the line buddy
-                neworder.append(buf)
-            del foundplace
-        else:                 # Doesn't have a priority
-            neworder.append(buf)
-
-    # Second pass to set all buffers to their correct values
-    infolist = wee.infolist_get("buffer", "", "")
-    while wee.infolist_next(infolist):
-        name = wee.infolist_string(infolist, "name")
-        if(wee.infolist_integer(infolist, "number") == 1):
-            continue
-        name = name.split('.', 1) # TODO Maybe servers with dots?
-        try:
-            name = name[1]
-        except IndexError:
-            name = name[0]
-        wee.buffer_set(wee.infolist_pointer(infolist, "pointer"),
-                "number", str((1+neworder.index(name))))
-
-    return
 
 def bpriority_add(dub):
     global buffers
@@ -145,10 +133,13 @@ def bpriority_del(dub):
     wee.prnt("", "Removed %s from the list of priorities" % (dub[0]))
     buffers.pop(dub[0])
     save_state()
+    reorder_buffers()
     return
 
 def bpriority_list():
+    global buffers
     wee.prnt("", str(buffers))
+    reorder_buffers();
     return
 
 # Cmd
@@ -177,6 +168,6 @@ if __name__ == "__main__" and import_ok:
                 "add del", # completions
                 "bpriority_cmd", "")
         load_state()
-        reorder_buffers()
         wee.hook_signal("buffer_opened", "reorder_cb", "")
+        reorder_buffers()
 
